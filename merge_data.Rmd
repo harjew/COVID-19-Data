@@ -1,0 +1,755 @@
+---
+title: "COVID-19"
+author: "Härje Widing"
+date: '2021-02-06'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Features Level 1
+
+* Gender: Female and Male
+
+* Deaths 
+
+* Cases
+
+* Country
+
+* Vaccinated
+
+
+## Countries done
+
+
+* Spain
+
+* Belgium 
+
+* Switzerland
+
+* UK?
+
+## Not done 
+
+* Sweden 
+
+* Denmark 
+
+* Germany 
+
+* Italy 
+
+# https://globalhealth5050.org/
+
+```{r}
+library(countrycode)
+library(COVID19)
+library(readxl)
+library(httr)
+library(stringr)
+library(tidyr)
+library(dplyr)
+set_year <- function(date){
+  # Saving year to date
+  rDate <- c()
+  y <- 2020 # Start year
+  for(d in 1:length(date)){
+    if(length(date) > 2){
+      if(grepl('Jan',date[d]) && (grepl('Dec',date[d-1]) || grepl('Nov',date[d-1]))){
+        y <- y+1
+      }
+    }else{
+      y <- 2021
+    }
+    dat <- paste(date[d],y)
+    rDate[d] <- dat
+  }
+  return(rDate)
+}
+clean_text <- function(str){
+  ret <- c()
+  for(i in str){
+    t <- strsplit(i,"\\.")[[1]]
+    t <- paste(t[grepl('^[A-Za-z]+$',t)], collapse = "_")
+    ret <- c(ret, t)
+  }
+  return(ret)
+}
+set_date_week <- function(str,format = "d-m-y"){
+  m <- c("Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+  set_m <- function(i){
+    i <- strsplit(i," ")[[1]]
+    i[2] <- which(m == i[2])
+    return(paste(i,collapse = "-"))
+  }
+  str <- set_year(str)
+  ret <-as.Date(unlist(lapply(str, set_m)),"%d-%m-%Y")
+  if(format == "W")
+    ret <- as.integer(strftime(ret,format = "%V"))
+  return(ret)
+}
+clean_presentage <- function(str){
+  ret <- c()
+  str <- as.vector(str)
+  for(i in str){
+    if(i != ""){
+      ret <- c(ret, as.numeric(strsplit(i,"%")[[1]]) / 100)
+    }else{
+      ret <- c(ret, NA)
+    }
+  }
+  return(ret)
+}
+
+as.numeric.factor <- function(x) {
+  if(is.factor(x)){
+    x <- as.numeric(levels(x))[x]
+  }
+  if(is.character(x)){
+    x <- as.numeric(x)
+  }
+  return(x)
+}
+
+covid19globalhealth <- function(country="World"){
+  # Collecting gender identifing deaths from different countries
+  # from https://globalhealth5050.org/
+  if(country == "World"){
+    url <- "https://globalhealth5050.org/?_covid-data=datasettable&_extype=csv"
+    data <- read.csv2(url, sep=",")
+    colnames(data) <- clean_text(colnames(data))
+    data[,6] <- clean_presentage(data[,6])
+    data[,7] <- clean_presentage(data[,7])
+    data[,10] <- clean_presentage(data[,10])
+    data[,11] <- clean_presentage(data[,11])
+    data[,13] <- clean_presentage(data[,13])
+    data[,14] <- clean_presentage(data[,14])
+    data[,1] <- countrycode(data[,2],origin = 'country.name' , destination = 'iso3c')
+    
+  }else{
+    url <-paste("https://globalhealth5050.org/?_covid-data=countries&_vartype=deaths_pct&_country=",
+                 country,"&_extype=csv",sep="")
+    data <- read.csv2(url, sep=",")
+    colnames(data) <- c("date", "total_covid_deaths", "male_covid_deaths","female_covid_deaths")
+    data$date <- set_date_week(data$date)
+    data$total_covid_deaths <- as.numeric.factor(data$total_covid_deaths)
+    data$male_covid_deaths <- rounc(as.numeric.factor(data$male_covid_deaths) / 100 * 
+                              data$total_covid_deaths)
+    data$female_covid_deaths <- round(as.numeric.factor(data$female_covid_deaths) / 100 * 
+                              data$total_covid_deaths)
+  }
+  return(data)
+}
+
+
+
+
+merge_globalheath_covid19dh <- function(country,data, verbose=T){
+  if(missing(data)){
+    data <- covid19globalhealth(country)
+  }
+  data$total_covid_deaths[data$total_covid_deaths == 0] <- NA
+  covid_19 <- covid19(country, level = 1, verbose = verbose)
+  df <- select(covid_19, date,confirmed,deaths, hosp, icu,tests, vaccines)
+  df2 <- merge(df,data,by="date",all=T)
+  
+  diff <- sum(abs(ifelse(is.na(df2$deaths[!is.na(df2$total_covid_deaths)]),0,
+                       df2$deaths[!is.na(df2$total_covid_deaths)]) - 
+                    df2$total_covid_deaths[!is.na(df2$total_covid_deaths)]))
+  if(verbose == T){
+    cat("Difference in data is", diff," deaths!\n")
+  }
+  
+  return(df2)
+}
+
+
+
+```
+
+
+
+
+# UK
+
+
+Data given by https://www.ons.gov.uk/ 
+
+
+
+
+
+
+```{r}
+
+get_covid_uk <- function(level = 1){
+  link_uk <- "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/birthsdeathsandmarriages/deaths/datasets/weeklyprovisionalfiguresondeathsregisteredinenglandandwales/2021/publishedweek032021replacement.xlsx"
+  GET(link_uk, write_disk(tf <- tempfile(fileext = ".xlsx")))
+  UK <- read_excel(tf, 8)
+  
+  search_for_uk <- c("Week number","Persons 4",
+                     "Deaths by region of usual residence 5", 
+                     "Males 4", "Females 4")
+  
+  find_rows <- function(data,column_nr, search_for){
+    df <- data.frame(Rows = rep(NA,length(search_for)))
+    rownames(df) <- search_for
+    for(s in search_for){
+      for(i in column_nr){
+        if(s %in% unlist(data[,i])){
+          df[s,1] <- which(s == unlist(data[,i]))
+        }
+      }
+    }
+    return(df)
+  }
+  rows <- find_rows(UK, c(1,2), search_for_uk)
+  
+  age_groups_uk <- c(UK$...2[11:30])
+  age_matrix <- matrix(nrow = 20,ncol = 2)
+  for(i in 1:length(age_groups_uk)){
+    age <- strsplit(age_groups_uk[i],"-")[[1]]
+    if(i == 1)
+      age <- c(0,1)
+     if(i == 20)
+      age <- c(90,NA)
+    
+    age_matrix[i,] <- age
+  }
+
+  sum_by_group <- function(data,row,col){
+    return(as.integer(colSums(data[row,col],na.rm = T)))
+  }
+
+  data <- UK[c(rows$Rows[1],rows$Rows[2]:rows$Rows[3]),]
+  nc <- ncol(data)
+  nage <- length(age_groups_uk) 
+  if(level == 1){
+    s <- 2
+    nage <- nage + 1
+    total_covid_deaths <-  sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
+    s <- s+nage + 1 
+    male_covid_deaths <- sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
+    s <- s+nage + 1
+    female_covid_deaths <- sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
+    
+    date <- c(as.Date(paste(2020, 0:51, 5, sep="-"), "%Y-%U-%u"),
+              as.Date(paste(2021, 0:(as.integer(data[1,nc-1])), 5, sep="-"), "%Y-%U-%u"))
+    df <- data.frame(WeekNo = c(as.integer(data[1,3:(nc-1)])),
+                     Year = c(rep(2020,53),rep(2021,as.integer(data[1,nc-1]))),
+                     date = date,
+                     total_covid_deaths = total_covid_deaths,
+                     male_covid_deaths = male_covid_deaths,
+                     female_covid_deaths = female_covid_deaths,
+                     country = "UK",
+                     Type = "Gender"
+                     )
+  }
+  if(level == 2){
+    
+    rows2 <- find_rows(data,2,c("Persons 4",
+                     "Males 4", "Females 4",
+                     "Deaths by region of usual residence 5"))
+
+    df <- data.frame(AgeGrp_min = as.numeric(), 
+                     AgeGrp_max = as.numeric(), 
+                     NUTS = as.character(), 
+                     Year = as.integer(), 
+                     WeekNo = as.integer(), 
+                     male_covid_death = as.integer(), 
+                     female_covid_death = as.integer(), 
+                     total_covid_death = as.integer(), 
+                     country = as.character(), 
+                     type = as.character())
+    
+    for(c in 3:(ncol(data)-1)){
+      y <- 2020
+      if(c > 55)
+        y <- 2021
+      
+      df <- rbind(df,
+                   data.frame(AgeGrp_min = age_matrix[,1], 
+                   AgeGrp_max = age_matrix[,2], 
+                   NUTS = "UK", 
+                   Year = y, 
+                   WeekNo = as.integer(data[1,c]), 
+                   male_covid_death = unlist(data[(rows2$Rows[2]+2):(rows2$Rows[3]-1), c]), 
+                   female_covid_death = unlist(data[(rows2$Rows[3]+2):(rows2$Rows[4]-1), c]), 
+                   total_covid_death = unlist(data[(rows2$Rows[1]+2):(rows2$Rows[2]-1), c]), 
+                   country = "UK", 
+                   type = "AgeGender"
+                  ))
+      
+    }
+  }
+  return(df)
+}
+
+```
+
+```{r}
+UK1 <- get_covid_uk(level = 1)
+UK2 <- get_covid_uk(level = 2)
+```
+```{r}
+write.csv2(UK1, "covid-data/COVID-19-UK-level-1.csv")
+write.csv2(UK2, "covid-data/COVID-19-UK-level-2.csv")
+
+```
+
+
+
+
+# Germany
+
+Have not found any online sources for Germany for age and gender
+
+```{r}
+
+#germany <- merge_globalheath_covid19dh(country = "Germany")
+
+
+```
+
+
+
+# Sweden
+
+
+
+```{r}
+
+
+#sweden <- merge_globalheath_covid19dh(country = "Sweden")
+
+```
+
+
+# Denmark
+
+
+```{r}
+#denmark<- merge_globalheath_covid19dh(country = "Denmark")
+
+```
+
+
+
+# Spain
+
+
+
+
+```{r}
+
+get_covid_spain <- function(level=1){
+  spain_link <- "https://cnecovid.isciii.es/covid19/resources/casos_hosp_uci_def_sexo_edad_provres.csv"
+  spain <- read.csv2(spain_link,sep=",")
+  # Translation 
+  colnames(spain) <- c("iso_province", "sex", "age_group","date",
+                     "nr_cases","nr_hospital","nr_icu","deaths")
+  spain$sex <- ifelse(spain$sex == "H", "male",spain$sex)
+  spain$sex <- ifelse(spain$sex == "M", "female",spain$sex)
+  spain$sex <- ifelse(spain$sex == "NC", "NC",spain$sex)
+
+  
+  if(level== 1){
+    date <- unique(spain$date)
+    sex <- unique(spain$sex)
+    df <- matrix(NA,ncol = 7, nrow = length(date))
+    i <- 1
+    for(d in date){
+      dfm <- sum(spain$deaths[which(spain$sex == "male" & spain$date == d)])
+      dff <- sum(spain$deaths[which(spain$sex == "female" & spain$date == d)])
+      dfnc <- sum(spain$deaths[which(spain$sex == "NC" & spain$date == d)])
+      dft <- dfnc + dff + dfm
+      w <- strftime(d, format = "%V")
+      y <- strsplit(d,"-")[[1]][1]
+      df[i,] <- c(d,y,w, dft,dfm, dff, dfnc)
+      i <- i +1
+      
+    }
+    
+    
+    df <- data.frame(df)
+    colnames(df) <- c("date","Year","WeekNo", "total_covid_death", "male_covid_death", 
+                      "female_covid_death","NC_covid_death")
+    df$country = "Spain"
+    df$Type = "Gender"
+                     
+
+  }
+  if(level == 2){
+    age_groups <- unique(spain$age_group)
+    age_matrix <- matrix(nrow = 10,ncol = 2)
+    for(i in 1:length(age_groups)){
+      age <- strsplit(age_groups[i],"-")[[1]]
+      if(i == 9)
+        age <- c(80,NA)
+       if(i == 10)
+        age <- c(NA,NA)
+      
+      age_matrix[i,] <- age
+    }
+    df <- data.frame(AgeGrp_min = as.numeric(), 
+                     AgeGrp_max = as.numeric(), 
+                     NUTS = as.character(), 
+                     date = as.character(),
+                     Year = as.integer(),
+                     WeekNo = as.integer(),
+                     male_covid_death = as.integer(), 
+                     female_covid_death = as.integer(), 
+                     nc_covid_death = as.integer(),
+                     total_covid_death = as.integer(), 
+                     country = as.character(), 
+                     type = as.character())
+    
+    for(d in date){
+      a_it <- 1
+       for(a in age_groups){
+        df2 <- spain[spain$date == d & spain$age_group == a,]
+        w <- strftime(d, format = "%V")
+        y <- strsplit(d,"-")[[1]][1]
+        
+        df <- rbind(df,
+                     data.frame(AgeGrp_min = age_matrix[,1][a_it], 
+                     AgeGrp_max = age_matrix[,2][a_it], 
+                     NUTS = "Spain", 
+                     date = d, 
+                     Year = y,
+                     WeekNo = w,
+                     male_covid_death = sum(df2$deaths[df2$sex == "male"]), 
+                     female_covid_death = sum(df2$deaths[df2$sex == "female"]), 
+                     nc_covid_death = sum(df2$deaths[df2$sex == "NC"]),
+                     total_covid_death = sum(df2$deaths), 
+                     country = "Spain", 
+                     type = "AgeGender"
+                    ))
+        a_it <- a_it + 1
+        
+       }
+    }
+    
+  }
+  
+  return(df)
+}
+```
+
+
+```{r}
+spain1 <- get_covid_spain(level = 1)
+spain2 <- get_covid_spain(level = 2)
+
+```
+
+```{r}
+write.csv2(spain1, "covid-data/COVID-19-SPAIN-level-1.csv")
+write.csv2(spain2, "covid-data/COVID-19-SPAIN-level-2.csv")
+
+```
+
+
+
+
+
+# Italy
+
+```{r}
+
+
+#italy <- merge_globalheath_covid19dh(country = "Italy")
+
+```
+
+
+# Belgium
+
+```{r}
+#belgium <- merge_globalheath_covid19dh(country = "Belgium")
+
+```
+
+
+
+```{r}
+get_covid_belgium <- function(level = 1){
+  belgium_link <- "https://epistat.sciensano.be/Data/COVID19BE_MORT.csv"
+  belgium <- read.csv2(belgium_link,sep=",")
+  date <- unique(belgium$DATE)
+  sex <- unique(belgium$SEX)
+  if(level== 1){
+    
+    df <- matrix(NA,ncol = 7, nrow = length(date))
+    i <- 1
+    for(d in date){
+      dfm <- sum(belgium$DEATHS[which(belgium$SEX == "M" & belgium$DATE == d)])
+      dff <- sum(belgium$DEATHS[which(belgium$SEX == "female" & belgium$DATE == d)])
+      dfnc <- sum(belgium$DEATHS[which(is.na(belgium$SEX) & belgium$DATE == d)])
+      dft <- dfnc + dff + dfm
+      w <- strftime(d, format = "%V")
+      y <- strsplit(d,"-")[[1]][1]
+      df[i,] <- c(d,y,w, dft,dfm, dff, dfnc)
+      i <- i +1
+    }
+    
+    df <- data.frame(df)
+    colnames(df) <- c("date","Year","WeekNo", "total_covid_death", "male_covid_death", 
+                      "female_covid_death","NC_covid_death")
+    df$country = "Belgium"
+    df$Type = "Gender"
+                     
+  }
+  if(level == 2){
+    age_groups <- unique(belgium$AGEGROUP)
+    age_matrix <- matrix(nrow = 7,ncol = 2)
+    for(i in 1:length(age_groups)){
+      age <- strsplit(age_groups[i],"-")[[1]]
+      if(i == 1)
+        age <- c(80,NA)
+       if(i == 7)
+        age <- c(NA,NA)
+      
+      age_matrix[i,] <- age
+    }
+    df <- data.frame(AgeGrp_min = as.numeric(), 
+                     AgeGrp_max = as.numeric(), 
+                     NUTS = as.character(), 
+                     date = as.character(), 
+                     Year = as.integer(),
+                     WeekNo = as.integer(),
+                     male_covid_death = as.integer(), 
+                     female_covid_death = as.integer(), 
+                     nc_covid_death = as.integer(),
+                     total_covid_death = as.integer(), 
+                     country = as.character(), 
+                     type = as.character())
+    
+    for(d in date){
+      a_it <- 1
+       for(a in age_groups){
+        df2 <- belgium[belgium$DATE == d & belgium$AGEGROUP == a,]
+        w <- strftime(d, format = "%V")
+        y <- strsplit(d,"-")[[1]][1]
+        
+        df <- rbind(df,
+                     data.frame(AgeGrp_min = age_matrix[,1][a_it], 
+                     AgeGrp_max = age_matrix[,2][a_it], 
+                     NUTS = "Belgium", 
+                     date = d,
+                     Year = y,
+                     WeekNo = w,
+                     male_covid_death = sum(df2$DEATHS[df2$sex == "M"]), 
+                     female_covid_death = sum(df2$DEATHS[df2$sex == "F"]), 
+                     nc_covid_death = sum(df2$DEATHS[is.na(df2$SEX)]),
+                     total_covid_death = sum(df2$DEATHS), 
+                     country = "Belgium", 
+                     type = "AgeGender"
+                    ))
+        a_it <- a_it + 1
+        
+       }
+    }
+    
+  }
+  return(df)
+}
+```
+
+```{r}
+belgium1 <- get_covid_belgium(level = 1)
+belgium2 <- get_covid_belgium(level = 2)
+
+```
+
+
+
+
+
+```{r}
+write.csv2(belgium1, "covid-data/COVID-19-BELGIUM-level-1.csv")
+write.csv2(belgium2, "covid-data/COVID-19-BELGIUM-level-2.csv")
+
+```
+
+# Switzerland 
+
+
+
+
+
+
+
+
+
+
+```{r}
+get_covid_switzerland <- function(level = 1){
+  # zip file that has to be open 
+  cat("Warning! Big file 120 mb about 10 min runtime.\n")
+  swi_link <- "https://www.bag.admin.ch/dam/bag/en/dokumente/mt/k-und-i/aktuelle-ausbrueche-pandemien/2019-nCoV/covid-19-basisdaten-fallzahlen.csv.download.csv/Data%20on%20laboratory%20findings%20and%20deaths.csv"
+
+  swi <- read.csv2(swi_link, sep=";")
+  colnames(swi) <- c("X", "col_date", "case_date", "Kanton", "age", "sex",
+                     "gender","sex2", "nr_confirmed_tests","death_date","nr_deaths")
+  swi$gender <- ifelse(swi$gender == "Weiblich", "female",swi$gender)
+  swi$gender <- ifelse(swi$gender == "Männlich", "male",swi$gender)
+  swi$gender <- ifelse(swi$gender == "Unbekannt", "NC",swi$gender)
+
+  # deaths
+  swi2 <- swi[which(swi$nr_deaths > 0),]
+  date <- unique(swi2$death_date)
+  sex <- unique(swi2$gender)
+  if(level == 1){
+    
+    df <- matrix(NA,ncol = 7, nrow = length(date))
+    i <- 1
+    for(d in date){
+      df2 <- swi2[which(swi2$death_date == d),]
+      dfm <- nrow(df2[which(df2$gender == "male"),])
+      dff <- nrow(df2[which(df2$gender == "female"),])
+      dfnc <- nrow(df2[which(df2$gender == "unknown"),])
+      w <- strftime(d, format = "%V")
+      y <- strsplit(d,"-")[[1]][1]
+      dft <- dfnc + dff + dfm
+      df[i,] <- c(d, y, w, dft, dfm, dff, dfnc)
+      i <- i +1
+    }
+    
+    df <- data.frame(df)
+    colnames(df) <- c("date","Year","WeekNo", "total_covid_death", "male_covid_death", 
+                      "female_covid_death","NC_covid_death")
+    df$country = "Switzerland"
+    df$Type = "Gender"
+                     
+  }
+  if(level == 2){
+    
+    age_groups <- unique(swi2$age)
+    age_matrix <- matrix(nrow = 8,ncol = 2)
+    for(i in 1:length(age_groups)){
+      age <- strsplit(age_groups[i]," - ")[[1]]
+      if(i == 1)
+        age <- c(80,NA)
+      
+      age_matrix[i,] <- age
+    }
+    
+    df <- data.frame(AgeGrp_min = as.numeric(), 
+                     AgeGrp_max = as.numeric(), 
+                     NUTS = as.character(), 
+                     date = as.character(), 
+                     Year = as.integer(),
+                     WeekNo = as.integer(),
+                     male_covid_death = as.integer(), 
+                     female_covid_death = as.integer(), 
+                     nc_covid_death = as.integer(),
+                     total_covid_death = as.integer(), 
+                     country = as.character(), 
+                     type = as.character())
+    
+    for(d in date){
+      a_it <- 1
+       for(a in age_groups){
+        df2 <- swi2[swi2$death_date == d & swi2$age == a,]
+        w <- strftime(d, format = "%V")
+        y <- strsplit(as.character(d),"-")[[1]][1]
+
+        df <- rbind(df,
+                     data.frame(AgeGrp_min = age_matrix[,1][a_it], 
+                     AgeGrp_max = age_matrix[,2][a_it], 
+                     NUTS = "Switzerland", 
+                     date = d,
+                     Year = y,
+                     WeekNo = w,
+                     male_covid_death = nrow(df2[df2$gender == "male",]), 
+                     female_covid_death = nrow(df2[df2$gender == "female",]), 
+                     nc_covid_death = nrow(df2[df2$gender == "NC",]),
+                     total_covid_death = nrow(df2), 
+                     country = "Switzerland", 
+                     type = "AgeGender"
+                    ))
+        a_it <- a_it + 1
+        
+       }
+    }
+    
+  }
+  return(df)
+}
+```
+
+
+```{r}
+switzerland1 <- get_covid_switzerland(level = 1)
+switzerland2 <- get_covid_switzerland(level = 2)
+
+```
+
+
+```{r}
+write.csv2(belgium1, "covid-data/COVID-19-SWITZERLAND-level-1.csv")
+write.csv2(belgium2, "covid-data/COVID-19-SWITZERLAND-level-2.csv")
+
+```
+
+
+
+# sources
+
+```{r}
+sources <- data.frame(country = c("UK", "Sapin", "Belgium", "Switzerland","Sweden", 
+                                  "Denmark", "Germany","Italy"), 
+                      source = c("https://www.ons.gov.uk/",#UK
+                                 "https://cnecovid.isciii.es/",#Spain 
+                                 "https://epistat.sciensano.be/", # Belgium
+                                 "https://www.bag.admin.ch/",# Switzerland
+                                 NA,# Sweden
+                                 NA, # Denmark
+                                 NA, #Germany
+                                 NA # Italy
+                                 ))
+```
+
+
+```{r}
+write.csv2(sources,"covid-data/sources.csv")
+```
+
+
+
+# Other
+
+Links to websites of statistical offices of each country: 
+UK: https://www.ons.gov.uk 
+Germany: https://www.destatis.de/EN/Home/_node.html 
+Sweden: https://www.scb.se/en/ 
+Denmark: https://www.dst.dk/en 
+Spain: https://www.ine.es/en/index.htm 
+Italy: https://www.istat.it/en/archivio/240106 
+Belgium: https://statbel.fgov.be/en/covid-19-statbel-data 
+Switzerland: https://www.bfs.admin.ch/bfs/en/home.html
+Look also at the following data sources: 
+https://globalhealth5050.org/the-sex-gender-and-covid-19-project/
+https://appsso.eurostat.ec.europa.eu/nui/show.do?dataset=demo_r_mweek3 
+https://github.com/CSSEGISandData/COVID-19/blob/master/README.md 
+https://coronavirus.data.gov.uk/details/download
+https://www.bag.admin.ch/bag/en/home/krankheiten/ausbrueche-epidemien-pandemien/aktuelle-ausbrueche-epidemien/novel-cov/situation-schweiz-und-international.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
