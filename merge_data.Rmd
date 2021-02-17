@@ -33,17 +33,17 @@ knitr::opts_chunk$set(echo = TRUE)
 
 * UK?
 
-## Not done 
+* Germany 
 
 * Sweden 
 
-* Denmark 
+## Not done 
 
-* Germany 
+* Denmark 
 
 * Italy 
 
-# https://globalhealth5050.org/
+# https://globalhealth5050.org/ not uesd
 
 ```{r}
 library(countrycode)
@@ -181,15 +181,12 @@ Data given by https://www.ons.gov.uk/
 
 
 
-
-
-
 ```{r}
 
 get_covid_uk <- function(level = 1){
-  link_uk <- "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/birthsdeathsandmarriages/deaths/datasets/weeklyprovisionalfiguresondeathsregisteredinenglandandwales/2021/publishedweek032021replacement.xlsx"
+  link_uk <- "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/birthsdeathsandmarriages/deaths/datasets/weeklyprovisionalfiguresondeathsregisteredinenglandandwales/2021/publishedweek052021.xlsx"
   GET(link_uk, write_disk(tf <- tempfile(fileext = ".xlsx")))
-  UK <- read_excel(tf, 8)
+  UK <- read_excel(tf, 9)
   
   search_for_uk <- c("Week number","Persons 4",
                      "Deaths by region of usual residence 5", 
@@ -306,14 +303,154 @@ write.csv2(UK2, "covid-data/COVID-19-UK-level-2.csv")
 
 # Germany
 
-Have not found any online sources for Germany for age and gender
+
+
+```{r}
+get_covid_germany <- function(level = 1){
+  cat("Warning Large file! about 5 min to load.\n")
+  g_link <- "https://opendata.arcgis.com/datasets/dd4580c810204019a7b8eb3e0b329dd6_0.csv"
+  ge2 <- read.csv2(g_link, sep=",")
+  colnames(ge2) <- c("stateID", "state_id", "state", "district", 
+                         "age_group", "gender", "No_cases", 
+                         "No_death", "date_hdp_aware", "county_id", 
+                         "data_status", "new_case","new_death", 
+                         "ref_date","new_recovery", "No_recovery","onset_of_disease",
+                         "age_group2"
+                         )
+  new_case_info <- data.frame(nr=c(0,1,-1,NA),info=c("Case is included in the publication for the 
+                                          current day and in the one for the previous day",
+                                          "Case is only included in the current publication",
+                                          "Case is only included in the previous day's publication",
+                                          "This results in: number of cases in the current publication 
+                                          as a sum (number of cases), if new case in (0.1); Delta on 
+                                          the previous day as the sum (number of cases) if new case 
+                                          in (-1.1)"))
+  new_death_info <- data.frame(nr=c(0,1,-1,-9,NA),info=c("0:The case in the publication is one death for the 
+                                                current day and one for the previous day",
+                                                "1: The case is a death in the current publication,
+                                                but not in the previous day's publication",
+                                                "-1: all is not a death in the current publication,
+                                                 however, it was a death in the previous day's publication",
+                                                "-9: The case is neither in the current publication nor in that
+                                                of the previous day a death",
+                                                "number of deaths in the current publication as a total 
+                                                (number of deaths) if new death in (0.1); Delta on the 
+                                                previous day as total (number of deaths) if new deaths 
+                                                in (-1.1)"))
+  
+  ge2_death <- ge2[ge2$No_death >0,] # Use only confirmed data 
+  
+  f <- function(i){
+    d <- strsplit(i,",")[[1]][1]
+    return(strsplit(as.character(d), " ")[[1]][1])
+  }
+  # Get date in new format
+  ge2_death$date <- unlist(lapply(ge2_death$date_hdp_aware, f))
+  # Translate gender
+  ge2_death$gender <- ifelse(ge2_death$gender == "M", "male", ge2_death$gender)
+  ge2_death$gender <- ifelse(ge2_death$gender == "W", "female", ge2_death$gender)
+  ge2_death$gender <- ifelse(ge2_death$gender == "unbekannt", "NC", ge2_death$gender)
+
+  if(level== 1){
+    date <- unique(ge2_death$date)
+    sex <- unique(ge2_death$gender)
+    df <- matrix(NA,ncol = 7, nrow = length(date))
+    i <- 1
+    for(d in date){
+      dfm <- sum(ge2_death$No_death[which(ge2_death$gender == "male" & ge2_death$date == d)])
+      dff <- sum(ge2_death$No_death[which(ge2_death$gender == "female" & ge2_death$date == d)])
+      dfnc <- sum(ge2_death$No_death[which(ge2_death$gender == "NC" & ge2_death$date == d)])
+      dft <- dfnc + dff + dfm
+      w <- strftime(d, format = "%V")
+      y <- strsplit(d,"/")[[1]][1]
+      df[i,] <- c(d,y,w, dft,dfm, dff, dfnc)
+      i <- i +1
+      
+    }
+    
+    
+    df <- data.frame(df)
+    colnames(df) <- c("date","Year","WeekNo", "total_covid_death", "male_covid_death", 
+                      "female_covid_death","NC_covid_death")
+    df$country = "Germany"
+    df$Type = "Gender"
+                     
+
+  }
+  if(level == 2){
+    age_groups <- unique(ge2_death$age_group)
+    age_matrix <- matrix(nrow = 7,ncol = 2)
+    for(i in 1:length(age_groups)){
+      age <- strsplit(age_groups[i],"-")[[1]]
+      age[1] <- as.numeric(strsplit(age[1],"A")[[1]][2])
+      age[2] <- as.numeric(strsplit(age[2],"A")[[1]][2])
+      if(i == 2)
+        age <- c(80,NA)
+       if(i == 6)
+        age <- c(NA,NA)
+      
+      age_matrix[i,] <- age
+    }
+    df <- data.frame(AgeGrp_min = as.numeric(), 
+                     AgeGrp_max = as.numeric(), 
+                     NUTS = as.character(), 
+                     date = as.character(),
+                     Year = as.integer(),
+                     WeekNo = as.integer(),
+                     male_covid_death = as.integer(), 
+                     female_covid_death = as.integer(), 
+                     nc_covid_death = as.integer(),
+                     total_covid_death = as.integer(), 
+                     country = as.character(), 
+                     type = as.character())
+    
+    for(d in date){
+      a_it <- 1
+       for(a in age_groups){
+        df2 <- ge2_death[ge2_death$date == d & ge2_death$age_group == a,]
+        w <- strftime(d, format = "%V")
+        y <- strsplit(d,"/")[[1]][1]
+        
+        df <- rbind(df,
+                     data.frame(AgeGrp_min = age_matrix[,1][a_it], 
+                     AgeGrp_max = age_matrix[,2][a_it], 
+                     NUTS = "Germany", 
+                     date = d, 
+                     Year = y,
+                     WeekNo = w,
+                     male_covid_death = sum(df2$No_death[df2$gender == "male"]), 
+                     female_covid_death = sum(df2$No_death[df2$gender == "female"]), 
+                     nc_covid_death = sum(df2$No_death[df2$gender == "NC"]),
+                     total_covid_death = sum(df2$No_death), 
+                     country = "Germany", 
+                     type = "AgeGender"
+                    ))
+        a_it <- a_it + 1
+        
+       }
+    }
+    
+  }
+  return(df)
+
+}
+
+```
+
+
+```{r}
+germany1 <- get_covid_germany(level = 1)
+germany2 <- get_covid_germany(level = 2)
+
+```
 
 ```{r}
 
-#germany <- merge_globalheath_covid19dh(country = "Germany")
-
+write.csv2(germany1, "covid-data/COVID-19-GERMANY-level-1.csv")
+write.csv2(germany2, "covid-data/COVID-19-GERMANY-level-2.csv")
 
 ```
+
 
 
 
@@ -322,11 +459,55 @@ Have not found any online sources for Germany for age and gender
 
 
 ```{r}
-
+# Data from Folkhäslomyndigheten 
+# Only level 1 is possible at the moment. 
+library(readxl)
+get_covid_sweden <- function(level =  1){
+  swe_dead <- read_excel("swe/dead_gender.xlsx")
+  colnames(swe_dead) <- c("date", "dead_male", "dead_female")
+  if(level== 1){
+    date <- as.Date(swe_dead$date)
+    df <- matrix(NA,ncol = 7, nrow = length(date))
+    for(r in 1:nrow(swe_dead)){
+      dfm <- sum(swe_dead$dead_male[r], na.rm = T)
+      dff <- sum(swe_dead$dead_female[r],na.rm = T)
+      dfnc <- 0
+      dft <- dfnc + dff + dfm
+      w <- strftime(as.character(date[r]), format = "%V")
+      y <- strsplit(as.character(date[r]),"-")[[1]][1]
+      df[r,] <- c(d,y,w, dft,dfm, dff, dfnc)
+    }
+    
+    
+    df <- data.frame(df)
+    colnames(df) <- c("date","Year","WeekNo", "total_covid_death", "male_covid_death", 
+                      "female_covid_death","NC_covid_death")
+    df$country = "Sweden"
+    df$Type = "Gender"
+                     
+  }
+  return(df)
+}
 
 #sweden <- merge_globalheath_covid19dh(country = "Sweden")
 
 ```
+
+
+
+
+
+
+```{r}
+sweden1 <- get_covid_sweden(level = 1)
+
+```
+
+```{r}
+write.csv2(sweden1, "covid-data/COVID-19-SWEDEN-level-1.csv")
+
+```
+
 
 
 # Denmark
@@ -692,8 +873,8 @@ switzerland2 <- get_covid_switzerland(level = 2)
 
 
 ```{r}
-write.csv2(belgium1, "covid-data/COVID-19-SWITZERLAND-level-1.csv")
-write.csv2(belgium2, "covid-data/COVID-19-SWITZERLAND-level-2.csv")
+write.csv2(switzerland1, "covid-data/COVID-19-SWITZERLAND-level-1.csv")
+write.csv2(switzerland2, "covid-data/COVID-19-SWITZERLAND-level-2.csv")
 
 ```
 
@@ -708,9 +889,9 @@ sources <- data.frame(country = c("UK", "Sapin", "Belgium", "Switzerland","Swede
                                  "https://cnecovid.isciii.es/",#Spain 
                                  "https://epistat.sciensano.be/", # Belgium
                                  "https://www.bag.admin.ch/",# Switzerland
-                                 NA,# Sweden
+                                 "https://www.folkhalsomyndigheten.se/",# Sweden
                                  NA, # Denmark
-                                 NA, #Germany
+                                 "https://opendata.arcgis.com/", #Germany
                                  NA # Italy
                                  ))
 ```

@@ -2,7 +2,7 @@
 
 # COVID-19 deaths by age and gender 
 
-The data has 3 different levels of data. 
+The data has 2 different levels of data. 
 
 ## Level 1 
 
