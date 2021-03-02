@@ -1,4 +1,4 @@
-"";"date";"Year";"WeekNo";"total_covid_deaths";"male_covid_deaths";"female_covid_deaths";"NC_covid_death";"country";"Type"
+"";"date";"Year";"WeekNo";"total_covid_death";"male_covid_death";"female_covid_death";"NC_covid_death";"country";"Type"
 "1";2020-01-03;2020;1;0;0;0;0;"UK";"Gender"
 "2";2020-01-10;2020;2;0;0;0;0;"UK";"Gender"
 "3";2020-01-17;2020;3;0;0;0;0;"UK";"Gender"
