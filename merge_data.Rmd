@@ -240,20 +240,20 @@ get_covid_uk <- function(level = 1){
   if(level == 1 | level == 4){
     s <- 2
     nage <- nage + 1
-    total_covid_deaths <-  sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
+    total_covid_death <-  sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
     s <- s+nage + 1 
-    male_covid_deaths <- sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
+    male_covid_death <- sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
     s <- s+nage + 1
-    female_covid_deaths <- sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
+    female_covid_death <- sum_by_group(data,c(s:(s+nage)),c(3:(nc-1)))
     
     date <- c(as.Date(paste(2020, 0:51, 5, sep="-"), "%Y-%U-%u"),
               as.Date(paste(2021, 0:(as.integer(data[1,nc-1])), 5, sep="-"), "%Y-%U-%u"))
     df <- data.frame(WeekNo = c(as.integer(data[1,3:(nc-1)])),
                      Year = c(rep(2020,53),rep(2021,as.integer(data[1,nc-1]))),
                      date = date,
-                     total_covid_deaths = total_covid_deaths,
-                     male_covid_deaths = male_covid_deaths,
-                     female_covid_deaths = female_covid_deaths,
+                     total_covid_deaths = total_covid_death,
+                     male_covid_deaths = male_covid_death,
+                     female_covid_deaths = female_covid_death,
                      country = "UK",
                      Type = "Gender"
                      )
@@ -297,6 +297,7 @@ get_covid_uk <- function(level = 1){
     }
     l$level2 <- df
   }
+   
   return(l)
 }
 
@@ -376,8 +377,9 @@ get_covid_germany <- function(level = 1){
   ge2_death$gender <- ifelse(ge2_death$gender == "W", "female", ge2_death$gender)
   ge2_death$gender <- ifelse(ge2_death$gender == "unbekannt", "NC", ge2_death$gender)
   l <- list()
+  date <- unique(ge2_death$date)
   if(level== 1 | level == 4){
-    date <- unique(ge2_death$date)
+    
     sex <- unique(ge2_death$gender)
     df <- matrix(NA,ncol = 7, nrow = length(date))
     i <- 1
@@ -457,6 +459,64 @@ get_covid_germany <- function(level = 1){
     }
     l$level2 <- df
   }
+  if(level == 3 | level == 4){
+    age_groups <- unique(ge2_death$age_group)
+    age_matrix <- matrix(nrow = 7,ncol = 2)
+    for(i in 1:length(age_groups)){
+      age <- strsplit(age_groups[i],"-")[[1]]
+      age[1] <- as.numeric(strsplit(age[1],"A")[[1]][2])
+      age[2] <- as.numeric(strsplit(age[2],"A")[[1]][2])
+      if(i == 2)
+        age <- c(80,NA)
+       if(i == 6)
+        age <- c(NA,NA)
+      
+      age_matrix[i,] <- age
+    }
+    region <- unique(ge2_death$state)
+    df <- data.frame(region = as.character(),
+                     AgeGrp_min = as.numeric(), 
+                     AgeGrp_max = as.numeric(), 
+                     NUTS = as.character(), 
+                     date = as.character(),
+                     Year = as.integer(),
+                     WeekNo = as.integer(),
+                     male_covid_death = as.integer(), 
+                     female_covid_death = as.integer(), 
+                     NC_covid_death = as.integer(),
+                     total_covid_death = as.integer(), 
+                     country = as.character(), 
+                     type = as.character())
+    for(r in region){
+      for(d in date){
+        a_it <- 1
+         for(a in age_groups){
+          df2 <- ge2_death[ge2_death$date == d & ge2_death$age_group == a & ge2_death$state == r,]
+          w <- strftime(d, format = "%V")
+          y <- strsplit(d,"/")[[1]][1]
+          
+          df <- rbind(df,
+                       data.frame(region = r,
+                                  AgeGrp_min = age_matrix[,1][a_it], 
+                       AgeGrp_max = age_matrix[,2][a_it], 
+                       NUTS = "Germany", 
+                       date = d, 
+                       Year = y,
+                       WeekNo = w,
+                       male_covid_death = sum(df2$No_death[df2$gender == "male"],na.rm = T), 
+                       female_covid_death = sum(df2$No_death[df2$gender == "female"],na.rm = T), 
+                       NC_covid_death = sum(df2$No_death[df2$gender == "NC"],na.rm = T),
+                       total_covid_death = sum(df2$No_death,na.rm = T), 
+                       country = "Germany", 
+                       type = "RegionAgeGender"
+                      ))
+          a_it <- a_it + 1
+          
+         }
+      }
+    }
+    l$level3 <- df
+  }
   return(l)
 
 }
@@ -474,6 +534,8 @@ get_covid_germany <- function(level = 1){
 germanyl <- get_covid_germany(level = 4)
 germany1 <- germanyl$level1
 germany2 <- germanyl$level2
+germany3 <- germanyl$level3
+
 ```
 
 ```{r}
@@ -481,6 +543,8 @@ germany2 <- germanyl$level2
 
 test_data(germany1)
 test_data(germany2)
+test_data(germany3)
+
 ```
 
 
@@ -488,6 +552,7 @@ test_data(germany2)
 
 write.csv2(germany1, "covid-data/COVID-19-GERMANY-level-1.csv")
 write.csv2(germany2, "covid-data/COVID-19-GERMANY-level-2.csv")
+write.csv2(germany3, "covid-data/COVID-19-GERMANY-level-3.csv")
 
 ```
 
@@ -556,7 +621,7 @@ write.csv2(sweden1, "covid-data/COVID-19-SWEDEN-level-1.csv")
 
 ```{r}
 #denmark<- merge_globalheath_covid19dh(country = "Denmark")
-
+link <- "https://files.ssi.dk/covid19/overvagning/data/data-epidemiologiske-rapport-25022021-1us0"
 ```
 
 
@@ -762,7 +827,7 @@ write.csv2(spain3, "covid-data/COVID-19-SPAIN-level-3.csv")
 # Italy
 
 ```{r}
-
+it <- covid19("Italy")
 
 #italy <- merge_globalheath_covid19dh(country = "Italy")
 
@@ -907,7 +972,7 @@ get_covid_belgium <- function(level = 1){
                        NC_covid_death = sum(df2$DEATHS[is.na(df2$SEX)],na.rm = T),
                        total_covid_death = sum(df2$DEATHS,na.rm = T), 
                        country = "Belgium", 
-                       type = "AgeGender"
+                       type = "RegionAgeGender"
                       ))
           a_it <- a_it + 1
           
@@ -1000,7 +1065,8 @@ get_covid_switzerland <- function(level = 1){
                       "female_covid_death","NC_covid_death")
     df$country = "Switzerland"
     df$Type = "Gender"
-    l$level1 <- df               
+    l$level1 <- df 
+    print("Level 1 done!")
   }
   if(level == 2 | level == 4){
     
@@ -1053,6 +1119,7 @@ get_covid_switzerland <- function(level = 1){
        }
     }
     l$level2 <- df
+    print("Level 2 done!")
   }
   if(level == 3 | level == 4){
     
@@ -1100,7 +1167,7 @@ get_covid_switzerland <- function(level = 1){
                        NC_covid_death = nrow(df2[df2$gender == "NC",]),
                        total_covid_death = nrow(df2), 
                        country = "Switzerland", 
-                       type = "AgeGender"
+                       type = "RegionAgeGender"
                       ))
           a_it <- a_it + 1
           
